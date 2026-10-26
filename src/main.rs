@@ -1,5 +1,6 @@
 mod album_color;
 mod i18n;
+mod limpeza;
 mod media;
 mod model;
 mod settings;
