@@ -21,20 +21,105 @@ pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
     let transport = mouse_area(icon::from_name(transport_icon(model)).size(size.0))
         .on_press(Message::TogglePlayPause);
 
-    let content = Row::new()
+    let previous = mouse_area(icon::from_name("media-skip-backward-symbolic").size(size.0))
+        .on_press(Message::PreviousTrack);
+    let next = mouse_area(icon::from_name("media-skip-forward-symbolic").size(size.0))
+        .on_press(Message::NextTrack);
+
+    let mut content = Row::new()
         .spacing(padding.0)
         .padding([0, padding.0])
-        .align_y(cosmic::iced::alignment::Vertical::Center)
-        .push(transport)
-        .push(
-            text(model.now_playing.text.as_str())
-                .size(size.0.saturating_sub(1))
-                .width(Length::Fixed(260.0))
-                .wrapping(Wrapping::None)
-                .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1))),
+        .align_y(cosmic::iced::alignment::Vertical::Center);
+
+    if let Some(path) = model.now_playing.album_art_path.as_ref() {
+        content = content.push(
+            icon::icon(icon::from_path(path.clone()))
+                .height(Length::Fixed(f32::from(size.0)))
+                .width(Length::Fixed(f32::from(size.0)))
+                .content_fit(ContentFit::Cover),
         );
+    }
+
+    // ORDEM: capa, nome, controles. A capa encosta no título porque as duas
+    // falam da MESMA música; os controles vão para a ponta, longe do texto que
+    // trunca. Pôr os botões no meio (como a primeira versão fazia) separava a
+    // capa da música e empurrava o nome cortado contra a Status Area vizinha.
+    //
+    // O TAMANHO DA FONTE VEM DO PAINEL, NÃO DO ÍCONE.
+    //   O upstream fazia `.size(suggested_size().0 - 1)` — isto é, usava o
+    //   tamanho do ÍCONE como tamanho da FONTE. Numa dock de ícone grande a
+    //   letra sai gigante ao lado do relógio da topbar. `core.applet.text()` é
+    //   o helper do libcosmic que escolhe body/title4/title3/title2 conforme o
+    //   painel, e é o que o relógio usa. `MIDIA_FONTE` sobrepõe em px quando ela
+    //   quiser cravar.
+    //
+    // TÍTULO E ARTISTA SÃO DOIS TEXTOS, NÃO UM.
+    //   O upstream junta tudo em `now_playing.text` ("Título - Artista"), e aí
+    //   não há como dar cor diferente para cada um. Aqui eles são widgets
+    //   separados dentro de um Row de largura FIXA.
+    //
+    // `panel_text_width` É TETO, NÃO TAMANHO — E A DIFERENÇA CUSTOU UMA BARRA.
+    //   Duas versões erraram antes desta. A primeira dividia a largura em
+    //   porções fixas (62/38): com título curto sobrava um BURACO visível antes
+    //   do `·`, e o artista parecia solto, de outra música. A segunda pôs os
+    //   textos em `Shrink` com um espaço `Fill` no fim — o buraco sumiu, mas o
+    //   Row continuava `Fixed`, então o applet RESERVAVA 440px estivesse o
+    //   texto ocupando isso ou não. MEDIDO em 24/08/2026, ao mudá-lo para a
+    //   topbar: os 440px empurraram bluetooth, volume e rede para o menu `⋯` de
+    //   estouro do painel. Numa dock larga isso não aparecia; numa topbar
+    //   cheia, aparece na hora.
+    //
+    //   Agora o Row é `Shrink` dentro de um `container` com `max_width`: o
+    //   applet mede o próprio texto e ocupa só isso, e a largura do `meow.conf`
+    //   passa a ser o LIMITE em que o título começa a elipsar. Curto não rouba
+    //   espaço de ninguém; longo não empurra os controles para fora.
+    let escrever = |conteudo: &'a str, cor: Option<cosmic::iced::Color>| {
+        let mut t = core
+            .applet
+            .text(conteudo)
+            .width(Length::Shrink)
+            .wrapping(Wrapping::None)
+            .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)));
+        if let Some(px) = model.settings.panel_font_size {
+            t = t.size(px);
+        }
+        if let Some(c) = cor {
+            t = t.class(cosmic::theme::Text::Color(c));
+        }
+        t
+    };
+
+    let mut separador = core.applet.text(" · ").wrapping(Wrapping::None);
+    if let Some(px) = model.settings.panel_font_size {
+        separador = separador.size(px);
+    }
+
+    let nome = Row::new()
+        .width(Length::Shrink)
+        .align_y(cosmic::iced::alignment::Vertical::Center)
+        .push(escrever(
+            model.now_playing.title.as_str(),
+            model.settings.title_color,
+        ))
+        .push(separador)
+        .push(escrever(
+            model.now_playing.artist.as_str(),
+            model.settings.artist_color,
+        ));
+
+    let nome = cosmic::widget::container(nome).max_width(model.settings.panel_text_width);
+
+    let mut content = content.push(nome);
+    // Os botões só entram se ela quiser. Ver `read_panel_controls`: na topbar
+    // dela o applet de Som já desenha os dele um dedo ao lado, e o par dobrado
+    // lê como defeito. O popup continua com os três, sempre.
+    if model.settings.panel_controls {
+        content = content.push(previous).push(transport).push(next);
+    }
+    let content = content;
 
     let album_color = model.album_color;
+    let color_style = model.settings.panel_color_style;
     let button = button::custom(content)
         .width(Length::Shrink)
         .height(Length::Shrink)
@@ -42,19 +127,27 @@ pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
         .class(cosmic::theme::Button::Custom {
             active: Box::new(move |focused, theme| {
                 let base = theme.active(focused, false, &cosmic::theme::Button::AppletIcon);
-                applet_button(base, album_color)
+                applet_button(base, album_color, color_style)
             }),
             disabled: Box::new(move |theme| {
                 let base = theme.disabled(&cosmic::theme::Button::AppletIcon);
-                applet_button(base, album_color)
+                applet_button(base, album_color, color_style)
             }),
             hovered: Box::new(move |focused, theme| {
                 let base = theme.hovered(focused, false, &cosmic::theme::Button::AppletIcon);
-                applet_button(base, album_color.map(|color| shift_color(color, 0.07)))
+                applet_button(
+                    base,
+                    album_color.map(|color| shift_color(color, 0.07)),
+                    color_style,
+                )
             }),
             pressed: Box::new(move |focused, theme| {
                 let base = theme.pressed(focused, false, &cosmic::theme::Button::AppletIcon);
-                applet_button(base, album_color.map(|color| shift_color(color, -0.08)))
+                applet_button(
+                    base,
+                    album_color.map(|color| shift_color(color, -0.08)),
+                    color_style,
+                )
             }),
         })
         .on_press(Message::TogglePopup);
@@ -76,33 +169,39 @@ pub fn popup<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
     core.applet.popup_container(content).into()
 }
 
+// A LARGURA DO POPUP NÃO É NOSSA — E NÃO É A `MIDIA_LARGURA`.
+//   Quem crava é o libcosmic, em `applet::Context::popup_container`:
+//   `Limits::NONE.min_width(360.0).max_width(360.0)`. Mínimo IGUAL ao máximo,
+//   360px lógicos, sempre. O `size_limits` que o `window.rs` entrega ao
+//   positioner (min 200 / max 370) descreve só o retângulo do Wayland e nunca
+//   chega à medição dos widgets. E `MIDIA_LARGURA` (440) é o TETO DO TEXTO NA
+//   BARRA — `panel_text_width`, usado lá em cima no `panel()` — e não tem
+//   caminho nenhum até aqui.
+//
+//   MEDIDO na captura de 25/08/2026 (tela dela, painel `S`, escala ~1,04): o
+//   cartão do popup media 375px de tela e a capa 84px. `375/360 = 1,042` e
+//   `84/80 = 1,05` — o MESMO fator. Ou seja: o cartão já ia de borda a borda
+//   nos 360 do libcosmic. O que faltava não era largura, era o que ocupasse
+//   ela.
+//
+// POR QUE O CONTEÚDO PARECIA "SÓ NA METADE ESQUERDA"
+//   Nada aqui estava furado por falta de `Length::Fill` — o `media_row` já
+//   herdava `Fill` do filho (o `push` do iced faz `self.width.enclose(child)`,
+//   `iced/widget/src/row.rs:136`), então a coluna de texto já media os 244px
+//   que sobram da capa. O buraco era de COMPOSIÇÃO: dos 360px de cartão só o
+//   ~172px de tinta à esquerda tinha conteúdo, e a única coisa ancorada na
+//   borda direita era a engrenagem, sozinha num andar próprio. Título curto
+//   como "All I Do" alinhado à esquerda num nó de 244px lê como buraco.
+//
+//   O conserto é distribuir, não alargar: a engrenagem desce para a LINHA DO
+//   TÍTULO (que já é `Fill`, então ela encosta na mesma margem direita que o
+//   resto) e os controles entram DENTRO da coluna de texto, herdando a margem
+//   esquerda do título. Some o andar vazio de cima, some a faixa morta debaixo
+//   da capa, e a altura da coluna passa a bater com a da capa.
 fn main_popup<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
     let size = core.applet.suggested_size(true);
     let padding = core.applet.suggested_padding(true);
     let artwork_size = size.0.saturating_mul(4);
-
-    let player_selector: Element<'_, Message> = if model.players.len() > 1 {
-        accessible_icon_button_without_tooltip(
-            "view-list-symbolic",
-            size.0,
-            fl!("select-player"),
-            Message::ShowPlayerList,
-        )
-    } else {
-        text("").width(Length::Fixed(f32::from(size.0))).into()
-    };
-
-    let header = Row::new()
-        .width(Length::Fill)
-        .align_y(cosmic::iced::alignment::Vertical::Center)
-        .push(player_selector)
-        .push(text("").width(Length::Fill))
-        .push(accessible_icon_button_without_tooltip(
-            "preferences-system-symbolic",
-            size.0,
-            fl!("settings"),
-            Message::ShowSettings,
-        ));
 
     let artwork = model.now_playing.album_art_path.as_ref().map_or_else(
         || {
@@ -121,28 +220,60 @@ fn main_popup<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
         },
     );
 
-    let media_info = Column::new()
+    // AS AÇÕES (lista de players + engrenagem) MORAM NA LINHA DO TÍTULO.
+    //   Antes eram um `Row` inteiro só para elas, com um `text("")` de espaçador
+    //   `Fill` e um segundo `text("")` de largura fixa no lugar do botão de
+    //   players quando só há um — um ícone solto num andar sem nada, custando
+    //   ~44px de altura para não alinhar com coisa nenhuma. Na linha do título
+    //   a engrenagem termina exatamente onde o título, o artista e os controles
+    //   terminam: uma margem direita só, para tudo. E o placeholder invisível
+    //   deixa de existir — o botão de players simplesmente não é empurrado.
+    let mut acoes = Row::new()
         .spacing(4)
+        .align_y(cosmic::iced::alignment::Vertical::Center);
+    if model.players.len() > 1 {
+        acoes = acoes.push(accessible_icon_button_without_tooltip(
+            "view-list-symbolic",
+            size.0,
+            fl!("select-player"),
+            Message::ShowPlayerList,
+        ));
+    }
+    let acoes = acoes.push(accessible_icon_button_without_tooltip(
+        "preferences-system-symbolic",
+        size.0,
+        fl!("settings"),
+        Message::ShowSettings,
+    ));
+
+    // `Fill` EXPLÍCITO, e não herdado. O `Row::push` do iced já promove a
+    // largura do pai para `Fill` quando um filho é `Fill`, mas isso é efeito
+    // colateral de quem se empurra dentro — trocar a ordem dos `push`, ou o
+    // título deixar de ser `Fill`, mudaria a largura do Row sem ninguém pedir.
+    // Escrito, o contrato fica: esta linha ocupa o que o popup der, o título
+    // fica com a sobra e as ações encostam na borda.
+    let titulo = Row::new()
+        .width(Length::Fill)
+        .spacing(8)
+        .align_y(cosmic::iced::alignment::Vertical::Center)
         .push(
             text(model.now_playing.title.as_str())
                 .size(size.0.saturating_sub(1))
                 .width(Length::Fill)
                 .wrapping(Wrapping::WordOrGlyph),
         )
-        .push(
-            text(model.now_playing.artist.as_str())
-                .size(size.0.saturating_sub(3))
-                .width(Length::Fill)
-                .wrapping(Wrapping::WordOrGlyph),
-        );
+        .push(acoes);
 
-    let media_row = Row::new()
-        .spacing(12)
-        .align_y(cosmic::iced::alignment::Vertical::Center)
-        .push(artwork)
-        .push(media_info.width(Length::Fill));
-
-    let controls = Row::new()
+    // OS CONTROLES DENTRO DA COLUNA DE TEXTO, E NÃO NUM ANDAR PRÓPRIO.
+    //   Num andar próprio eles caíam no `align_x(Center)` da coluna de fora e
+    //   ficavam centrados no CARTÃO INTEIRO: medido na captura, o centro dos
+    //   três botões batia em 1153px e o centro do cartão em 1156px — três
+    //   pixels de diferença, ou seja, alinhados com o popup e não com o texto.
+    //   O efeito colateral era a faixa morta debaixo da capa, que é alta
+    //   (`artwork_size` = 4x o ícone do painel = 80px na barra `S` dela).
+    //   Presos à coluna de texto eles herdam a margem esquerda do título.
+    let controles = Row::new()
+        .width(Length::Fill)
         .spacing(padding.0)
         .align_y(cosmic::iced::alignment::Vertical::Center)
         .push(accessible_icon_button_without_tooltip(
@@ -164,13 +295,32 @@ fn main_popup<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
             Message::NextTrack,
         ));
 
+    let media_info = Column::new()
+        .width(Length::Fill)
+        .spacing(4)
+        .push(titulo)
+        .push(
+            text(model.now_playing.artist.as_str())
+                .size(size.0.saturating_sub(3))
+                .width(Length::Fill)
+                .wrapping(Wrapping::WordOrGlyph),
+        )
+        .push(controles);
+
+    // Uma linha só: capa à esquerda, tudo o mais na coluna que ocupa a sobra.
+    // O `align_x(Center)` que existia na coluna de fora saiu junto com os
+    // andares — ele era o que centrava os controles no cartão, e sem andares
+    // soltos não sobrou nada para centralizar.
     Column::new()
         .padding(12)
-        .spacing(12)
-        .align_x(cosmic::iced::Alignment::Center)
-        .push(header)
-        .push(media_row)
-        .push(controls)
+        .push(
+            Row::new()
+                .width(Length::Fill)
+                .spacing(12)
+                .align_y(cosmic::iced::alignment::Vertical::Center)
+                .push(artwork)
+                .push(media_info),
+        )
         .into()
 }
 

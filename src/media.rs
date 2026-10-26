@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
@@ -12,6 +14,9 @@ use crate::model::{MediaSnapshot, NowPlayingData, PlaybackState, PlayerInfo};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
+const ART_DOWNLOAD_TIMEOUT_SECONDS: &str = "8";
+const ART_DOWNLOAD_MAX_BYTES: &str = "8388608";
+const ART_CACHE_MAX_FILES: usize = 256;
 
 #[derive(Clone, Copy, Debug)]
 pub enum MediaCommand {
@@ -30,7 +35,8 @@ pub fn initial_snapshot() -> MediaSnapshot {
         }
     };
 
-    match scan(&finder) {
+    // Startup runs on the UI thread: consult the cache, never block on the network.
+    match scan(&finder, false) {
         Ok(snapshot) => snapshot,
         Err(error) => {
             eprintln!("unable to read initial MPRIS state: {error}");
@@ -77,6 +83,10 @@ fn monitor() -> impl cosmic::iced::futures::Stream<Item = MediaSnapshot> {
 }
 
 fn monitor_loop(output: &mut mpsc::Sender<MediaSnapshot>) {
+    // Lida UMA vez, na subida: o laço roda a cada 500ms e reler o arquivo ali
+    // seriam 120 leituras de disco por minuto para uma chave que quase nunca
+    // muda. Trocar `album-art-remote` vale no próximo início do applet.
+    let allow_download = crate::settings::read_album_art_remote();
     let mut finder = None;
     let mut last_sent = None;
 
@@ -99,7 +109,7 @@ fn monitor_loop(output: &mut mpsc::Sender<MediaSnapshot>) {
         let Some(active_finder) = finder.as_ref() else {
             continue;
         };
-        let snapshot = match scan(active_finder) {
+        let snapshot = match scan(active_finder, allow_download) {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 eprintln!("unable to poll MPRIS players: {error}");
@@ -121,24 +131,24 @@ fn monitor_loop(output: &mut mpsc::Sender<MediaSnapshot>) {
     }
 }
 
-fn scan(finder: &PlayerFinder) -> Result<MediaSnapshot, mpris::FindingError> {
+fn scan(finder: &PlayerFinder, allow_download: bool) -> Result<MediaSnapshot, mpris::FindingError> {
     let players = finder
         .find_all()?
         .iter()
-        .map(player_info)
+        .map(|player| player_info(player, allow_download))
         .collect::<Vec<_>>();
     Ok(MediaSnapshot { players })
 }
 
-fn player_info(player: &mpris::Player) -> PlayerInfo {
+fn player_info(player: &mpris::Player, allow_download: bool) -> PlayerInfo {
     PlayerInfo {
         id: player.bus_name().to_owned(),
         identity: player.identity().to_owned(),
-        now_playing: now_playing(player),
+        now_playing: now_playing(player, allow_download),
     }
 }
 
-fn now_playing(player: &mpris::Player) -> NowPlayingData {
+fn now_playing(player: &mpris::Player, allow_download: bool) -> NowPlayingData {
     let state = playback_state(player);
     let Ok(metadata) = player.get_metadata() else {
         return NowPlayingData {
@@ -148,6 +158,38 @@ fn now_playing(player: &mpris::Player) -> NowPlayingData {
     };
 
     if metadata.is_empty() {
+        return NowPlayingData {
+            state,
+            ..NowPlayingData::nothing_playing()
+        };
+    }
+
+    // METADATA NAO-VAZIO E SEM FAIXA NAO E UMA FAIXA (2026-09-18)
+    //
+    //   O guard logo acima pergunta `metadata.is_empty()`, e um metadata com
+    //   UMA chave nao esta vazio. O Chrome, sem nada tocando, publica
+    //   exatamente isso e escapava por aqui: PlaybackStatus "Stopped" e
+    //   Metadata com uma chave so, `mpris:length` = 0.
+    //
+    //   Sem `xesam:title` e sem `xesam:artist`, as duas extracoes abaixo caiam
+    //   nos fallbacks `unknown-title` e `unknown-artist`, que no i18n sao a
+    //   MESMA palavra: "Unknown". O painel anunciava "Unknown - Unknown" o dia
+    //   inteiro, sem musica nenhuma em lugar nenhum.
+    //
+    //   Marcar como `nothing_playing` nao e cosmetico: `has_usable_metadata`
+    //   vira false, `AppModel::has_active_media()` acompanha, e `ui.rs:15`
+    //   devolve `text("")` -- o applet SOME do painel, que e o que se espera de
+    //   um player parado. E `preferred_player` deixa de eleger esse player
+    //   quando outro tiver faixa de verdade.
+    //
+    //   Os fallbacks FICAM: um player que anuncia so o titulo, ou so o artista,
+    //   continua valendo como faixa. O criterio novo e a AUSENCIA DOS DOIS.
+    let sem_titulo = metadata.title().is_none();
+    let sem_artista = match metadata.artists() {
+        Some(artistas) => artistas.is_empty(),
+        None => true,
+    };
+    if sem_titulo && sem_artista {
         return NowPlayingData {
             state,
             ..NowPlayingData::nothing_playing()
@@ -167,7 +209,9 @@ fn now_playing(player: &mpris::Player) -> NowPlayingData {
         title,
         artist,
         state,
-        album_art_path: metadata.art_url().and_then(file_url_to_path),
+        album_art_path: metadata
+            .art_url()
+            .and_then(|url| art_path(url, allow_download)),
         has_usable_metadata: true,
     }
 }
@@ -178,6 +222,99 @@ fn playback_state(player: &mpris::Player) -> PlaybackState {
         Ok(PlaybackStatus::Paused) => PlaybackState::Paused,
         Ok(PlaybackStatus::Stopped) => PlaybackState::Stopped,
         Err(_) => PlaybackState::Unknown,
+    }
+}
+
+/// Local `file://` art, or a remote `http(s)://` cover downloaded once into the
+/// user cache. Spotify (and every web-backed player) only ever exposes an https
+/// `mpris:artUrl`, which `file_url_to_path` rejects by design.
+fn art_path(value: &str, allow_download: bool) -> Option<PathBuf> {
+    file_url_to_path(value).or_else(|| remote_url_to_cached_path(value, allow_download))
+}
+
+/// Onde a capa remota `value` mora (ou moraria) no cache. `None` quando a URL
+/// não é http(s) — é o que mantém `file://` no caminho do upstream e recusa
+/// qualquer outro esquema sem executar nada.
+fn art_cache_path(value: &str) -> Option<PathBuf> {
+    let url = Url::parse(value).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    Some(
+        dirs::cache_dir()?
+            .join("cosmic-ext-applet-now-playing/art")
+            .join(format!("{:016x}", hasher.finish())),
+    )
+}
+
+fn remote_url_to_cached_path(value: &str, allow_download: bool) -> Option<PathBuf> {
+    let path = art_cache_path(value)?;
+    let directory = path.parent()?.to_path_buf();
+    if path.is_file() {
+        return Some(path);
+    }
+    if !allow_download {
+        // Cache miss on the UI thread. The monitor thread will fetch it and the
+        // next snapshot carries the cover; stalling startup is never worth it.
+        return None;
+    }
+
+    std::fs::create_dir_all(&directory).ok()?;
+    let partial = path.with_extension("part");
+    let downloaded = Command::new("curl")
+        .arg("--silent")
+        .arg("--fail")
+        .arg("--location")
+        .arg("--max-time")
+        .arg(ART_DOWNLOAD_TIMEOUT_SECONDS)
+        .arg("--max-filesize")
+        .arg(ART_DOWNLOAD_MAX_BYTES)
+        .arg("--proto")
+        .arg("=http,https")
+        .arg("--output")
+        .arg(&partial)
+        .arg(value)
+        .status()
+        .is_ok_and(|status| status.success());
+
+    if !downloaded {
+        let _ = std::fs::remove_file(&partial);
+        return None;
+    }
+
+    std::fs::rename(&partial, &path).ok()?;
+    prune_art_cache(&directory);
+    Some(path)
+}
+
+/// The cache is one ~160 KB JPEG per album ever played. Left alone it grows
+/// without a ceiling, so keep the newest `ART_CACHE_MAX_FILES` and drop the rest.
+fn prune_art_cache(directory: &Path) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let metadata = entry.metadata().ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
+            Some((metadata.modified().ok()?, entry.path()))
+        })
+        .collect();
+
+    if files.len() <= ART_CACHE_MAX_FILES {
+        return;
+    }
+
+    files.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    for (_, stale) in files.drain(ART_CACHE_MAX_FILES..) {
+        let _ = std::fs::remove_file(stale);
     }
 }
 
@@ -210,7 +347,7 @@ fn has_valid_percent_encoding(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::file_url_to_path;
+    use super::{art_cache_path, art_path, file_url_to_path};
     use std::path::PathBuf;
 
     #[test]
@@ -242,5 +379,49 @@ mod tests {
         );
         assert_eq!(file_url_to_path("file:///home/user/bad%2.png"), None);
         assert_eq!(file_url_to_path("file:///home/user/bad%ZZ.png"), None);
+    }
+
+    // A QUEIXA INTEIRA MORAVA AQUI. Antes deste patch, `album_art_path` era
+    // `metadata.art_url().and_then(file_url_to_path)`: toda URL https caía fora
+    // e, com ela, a cor do álbum — que é extraída da capa. O Spotify publica
+    // `https://i.scdn.co/image/...` e NUNCA um `file://`.
+    #[test]
+    fn https_deixou_de_ser_descartado() {
+        let url = "https://i.scdn.co/image/ab67616d0000b27321dac5d2bf93bb6ad805a87f";
+        assert!(
+            art_cache_path(url).is_some(),
+            "capa https tem de ter lugar no cache"
+        );
+    }
+
+    #[test]
+    fn cache_e_deterministico_e_separa_urls() {
+        let a = "https://i.scdn.co/image/aaaa";
+        let b = "https://i.scdn.co/image/bbbb";
+        assert_eq!(art_cache_path(a), art_cache_path(a));
+        assert_ne!(art_cache_path(a), art_cache_path(b));
+    }
+
+    #[test]
+    fn esquema_estranho_continua_recusado() {
+        assert_eq!(art_cache_path("ftp://example.com/cover.png"), None);
+        assert_eq!(art_cache_path("data:image/png;base64,AAAA"), None);
+        assert_eq!(art_cache_path("nao-e-url"), None);
+    }
+
+    // A thread da interface NUNCA baixa: um `i.scdn.co` lento penduraria a
+    // subida do applet, e o painel inteiro junto.
+    #[test]
+    fn sem_download_e_sem_cache_nao_ha_capa() {
+        let url = "https://exemplo.invalido/nunca-cacheado-9f3a2b1c.png";
+        assert_eq!(art_path(url, false), None);
+    }
+
+    #[test]
+    fn file_url_nao_passa_pelo_cache() {
+        assert_eq!(
+            art_path("file:///home/user/Album%20Art.png", false),
+            Some(PathBuf::from("/home/user/Album Art.png"))
+        );
     }
 }
