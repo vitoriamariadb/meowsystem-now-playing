@@ -11,11 +11,18 @@ use crate::settings::ColorStyle;
 ///   `vidro.sh` do `MeowSystem` escreve a opacidade do painel, e um fundo opaco
 ///   neste botão abre um retângulo sólido no meio da dock, que é o oposto da
 ///   folha visual dela ("o nosso tema é o traço, não o chapado").
+///
+/// `fundo` é a cor de fundo da configuração: quando existe, vale em qualquer
+/// modo e o contraste do traço passa a ser medido contra ela.
 pub fn applet_button(
     mut base: button::Style,
     color: Option<Color>,
     style: ColorStyle,
+    fundo: Option<Color>,
 ) -> button::Style {
+    if let Some(fundo) = fundo {
+        base.background = Some(Background::Color(fundo));
+    }
     let Some(album) = color else {
         return base;
     };
@@ -152,7 +159,12 @@ mod tests {
             background: Some(Background::Color(PAINEL_ESCURO)),
             ..button::Style::default()
         };
-        let saida = applet_button(base, Some(Color::from_rgb8(200, 80, 120)), ColorStyle::Traco);
+        let saida = applet_button(
+            base,
+            Some(Color::from_rgb8(200, 80, 120)),
+            ColorStyle::Traco,
+            None,
+        );
         assert_eq!(saida.background, Some(Background::Color(PAINEL_ESCURO)));
         assert!(saida.icon_color.is_some());
     }
@@ -163,7 +175,12 @@ mod tests {
             background: Some(Background::Color(PAINEL_ESCURO)),
             ..button::Style::default()
         };
-        let saida = applet_button(base, Some(Color::from_rgb8(200, 80, 120)), ColorStyle::Chapado);
+        let saida = applet_button(
+            base,
+            Some(Color::from_rgb8(200, 80, 120)),
+            ColorStyle::Chapado,
+            None,
+        );
         assert_ne!(saida.background, Some(Background::Color(PAINEL_ESCURO)));
     }
 
@@ -175,9 +192,21 @@ mod tests {
     }
 
     #[test]
+    fn fundo_da_configuracao_vale_sem_capa() {
+        let fundo = Color::from_rgb8(0x1e, 0x1e, 0x2e);
+        let saida = applet_button(
+            button::Style::default(),
+            None,
+            ColorStyle::Traco,
+            Some(fundo),
+        );
+        assert_eq!(saida.background, Some(Background::Color(fundo)));
+    }
+
+    #[test]
     fn sem_cor_de_album_nada_muda() {
         let base = button::Style::default();
-        let saida = applet_button(base, None, ColorStyle::Traco);
+        let saida = applet_button(base, None, ColorStyle::Traco, None);
         assert!((saida.border_width - button::Style::default().border_width).abs() < f32::EPSILON);
     }
 }

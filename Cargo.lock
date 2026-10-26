@@ -2986,6 +2986,7 @@ dependencies = [
  "libcosmic",
  "mpris",
  "rust-embed",
+ "serde",
  "tempfile",
  "url",
 ]

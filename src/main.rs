@@ -1,4 +1,5 @@
 mod album_color;
+mod faixa;
 mod fonte;
 mod i18n;
 mod limpeza;

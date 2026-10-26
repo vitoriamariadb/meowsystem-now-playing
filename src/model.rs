@@ -4,6 +4,7 @@ use cosmic::iced::Color;
 
 use crate::album_color::dominant_album_color;
 use crate::fl;
+use crate::fonte::Fonte;
 use crate::settings::AppSettings;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -23,6 +24,8 @@ pub struct NowPlayingData {
     pub state: PlaybackState,
     pub album_art_path: Option<PathBuf>,
     pub has_usable_metadata: bool,
+    /// O serviço por trás do player, quando dá para saber.
+    pub fonte: Option<Fonte>,
 }
 
 impl NowPlayingData {
@@ -35,6 +38,7 @@ impl NowPlayingData {
             state: PlaybackState::Stopped,
             album_art_path: None,
             has_usable_metadata: false,
+            fonte: None,
         }
     }
 }
@@ -121,9 +125,19 @@ impl AppModel {
         self.popup_page = page;
     }
 
-    pub fn set_album_color_enabled(&mut self, enabled: bool) {
-        self.settings.album_color_enabled = enabled;
+    pub fn set_settings(&mut self, settings: AppSettings) {
+        self.settings = settings;
         self.refresh_album_color();
+    }
+
+    /// A cor do título: a do serviço, quando ligada e reconhecida; senão a do tema.
+    #[must_use]
+    pub fn title_color(&self) -> Option<Color> {
+        self.now_playing
+            .fonte
+            .filter(|_| self.settings.source_colors)
+            .map(Fonte::cor)
+            .or(self.settings.title_color)
     }
 
     #[must_use]
@@ -181,6 +195,7 @@ mod tests {
                 state,
                 album_art_path: None,
                 has_usable_metadata: has_metadata,
+                fonte: None,
             },
         }
     }
@@ -245,6 +260,35 @@ mod tests {
             );
             assert!(model.has_active_media());
         }
+    }
+
+    #[test]
+    fn source_color_wins_over_theme_only_when_enabled() {
+        let theme = Color::from_rgb8(0xcb, 0xa6, 0xf7);
+        let mut youtube = player("yt", PlaybackState::Playing, true);
+        youtube.now_playing.fonte = Some(Fonte::YouTube);
+        let mut model = AppModel::new(
+            AppSettings {
+                title_color: Some(theme),
+                ..AppSettings::default()
+            },
+            snapshot(vec![youtube.clone()]),
+        );
+        assert_eq!(model.title_color(), Some(Fonte::YouTube.cor()));
+
+        model.set_settings(AppSettings {
+            title_color: Some(theme),
+            source_colors: false,
+            ..AppSettings::default()
+        });
+        assert_eq!(model.title_color(), Some(theme));
+
+        model.set_settings(AppSettings {
+            title_color: Some(theme),
+            ..AppSettings::default()
+        });
+        model.apply_snapshot(snapshot(vec![player("vlc", PlaybackState::Playing, true)]));
+        assert_eq!(model.title_color(), Some(theme));
     }
 
     #[test]

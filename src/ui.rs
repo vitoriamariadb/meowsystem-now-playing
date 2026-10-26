@@ -1,16 +1,20 @@
 use cosmic::Element;
 use cosmic::app::Core;
 use cosmic::iced::advanced::text::{Ellipsize, EllipsizeHeightLimit, Wrapping};
+use cosmic::iced::{Background, Border, Color};
 use cosmic::iced::{ContentFit, Length};
 use cosmic::widget::{
-    Column, Row, button, button::Catalog, icon, mouse_area, settings, text, toggler,
+    Column, Row, button, button::Catalog, container, icon, mouse_area, scrollable, settings,
+    slider, spin_button, text, text_input, toggler,
 };
 
 use crate::fl;
 use crate::model::{AppModel, PlaybackState, PopupPage};
+use crate::settings::{self as config, ColorStyle};
 use crate::style::{applet_button, shift_color};
-use crate::window::Message;
+use crate::window::{Ajuste, Message};
 
+#[allow(clippy::too_many_lines)]
 pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
     if !model.has_active_media() {
         return core.applet.autosize_window(text("")).into();
@@ -83,29 +87,36 @@ pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
         if let Some(px) = model.settings.panel_font_size {
             t = t.size(px);
         }
+        if let Some(fonte) = model.settings.panel_font {
+            t = t.font(fonte);
+        }
         if let Some(c) = cor {
             t = t.class(cosmic::theme::Text::Color(c));
         }
         t
     };
 
-    let mut separador = core.applet.text(" · ").wrapping(Wrapping::None);
-    if let Some(px) = model.settings.panel_font_size {
-        separador = separador.size(px);
-    }
-
-    let nome = Row::new()
+    let mut nome = Row::new()
         .width(Length::Shrink)
         .align_y(cosmic::iced::alignment::Vertical::Center)
         .push(escrever(
             model.now_playing.title.as_str(),
-            model.settings.title_color,
-        ))
-        .push(separador)
-        .push(escrever(
+            model.title_color(),
+        ));
+    // Sem artista não há separador: «Filme ·» lê como texto cortado.
+    if !model.now_playing.artist.is_empty() {
+        let mut separador = core.applet.text(" · ").wrapping(Wrapping::None);
+        if let Some(px) = model.settings.panel_font_size {
+            separador = separador.size(px);
+        }
+        if let Some(fonte) = model.settings.panel_font {
+            separador = separador.font(fonte);
+        }
+        nome = nome.push(separador).push(escrever(
             model.now_playing.artist.as_str(),
             model.settings.artist_color,
         ));
+    }
 
     let nome = cosmic::widget::container(nome).max_width(model.settings.panel_text_width);
 
@@ -120,6 +131,7 @@ pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
 
     let album_color = model.album_color;
     let color_style = model.settings.panel_color_style;
+    let fundo = model.settings.background_color;
     let button = button::custom(content)
         .width(Length::Shrink)
         .height(Length::Shrink)
@@ -127,11 +139,11 @@ pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
         .class(cosmic::theme::Button::Custom {
             active: Box::new(move |focused, theme| {
                 let base = theme.active(focused, false, &cosmic::theme::Button::AppletIcon);
-                applet_button(base, album_color, color_style)
+                applet_button(base, album_color, color_style, fundo)
             }),
             disabled: Box::new(move |theme| {
                 let base = theme.disabled(&cosmic::theme::Button::AppletIcon);
-                applet_button(base, album_color, color_style)
+                applet_button(base, album_color, color_style, fundo)
             }),
             hovered: Box::new(move |focused, theme| {
                 let base = theme.hovered(focused, false, &cosmic::theme::Button::AppletIcon);
@@ -139,6 +151,7 @@ pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
                     base,
                     album_color.map(|color| shift_color(color, 0.07)),
                     color_style,
+                    fundo.map(|color| shift_color(color, 0.05)),
                 )
             }),
             pressed: Box::new(move |focused, theme| {
@@ -147,6 +160,7 @@ pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
                     base,
                     album_color.map(|color| shift_color(color, -0.08)),
                     color_style,
+                    fundo.map(|color| shift_color(color, -0.05)),
                 )
             }),
         })
@@ -155,7 +169,11 @@ pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
     core.applet.autosize_window(button).into()
 }
 
-pub fn popup<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
+pub fn popup<'a>(
+    core: &Core,
+    model: &'a AppModel,
+    config: &'a config::Config,
+) -> Element<'a, Message> {
     if !model.has_active_media() {
         return core.applet.popup_container(text("")).into();
     }
@@ -163,7 +181,7 @@ pub fn popup<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
     let content = match model.popup_page {
         PopupPage::Main => main_popup(core, model),
         PopupPage::PlayerList => player_list(core, model),
-        PopupPage::Settings => settings_page(core, model),
+        PopupPage::Settings => settings_page(core, model, config),
     };
 
     core.applet.popup_container(content).into()
@@ -384,16 +402,148 @@ fn player_list<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
         .into()
 }
 
-fn settings_page<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
+// Lista declarativa de opções: partir em funções só espalharia os rótulos.
+#[allow(clippy::too_many_lines)]
+fn settings_page<'a>(
+    core: &Core,
+    model: &'a AppModel,
+    config: &'a config::Config,
+) -> Element<'a, Message> {
     let size = core.applet.suggested_size(true);
+    let atual = &model.settings;
+
+    let alternar = |rotulo: String, valor: bool, ajuste: fn(bool) -> Ajuste| {
+        settings::item(
+            rotulo,
+            toggler(valor).on_toggle(move |v| Message::Ajustar(ajuste(v))),
+        )
+    };
+    let cor = |rotulo: String, valor: &'a str, ajuste: fn(String) -> Ajuste| {
+        settings::item(
+            rotulo,
+            Row::new()
+                .spacing(8)
+                .align_y(cosmic::iced::alignment::Vertical::Center)
+                .push(amostra(config::cor_de_hex(valor)))
+                .push(
+                    text_input(fl!("theme-default"), valor)
+                        .on_input(move |v| Message::Ajustar(ajuste(v)))
+                        .width(Length::Fixed(104.0)),
+                ),
+        )
+    };
+
+    let largura = config::largura_valida(config.panel_text_width);
+    let fonte_rotulo = config::fonte_valida(config.panel_font_size)
+        .map_or_else(|| fl!("automatic"), |px| format!("{px} px"));
+
+    let aparencia = settings::section()
+        .title(fl!("appearance"))
+        .add(cor(
+            fl!("title-color"),
+            &config.title_color,
+            Ajuste::CorDoTitulo,
+        ))
+        .add(cor(
+            fl!("artist-color"),
+            &config.artist_color,
+            Ajuste::CorDoArtista,
+        ))
+        .add(cor(
+            fl!("background-color"),
+            &config.background_color,
+            Ajuste::CorDoFundo,
+        ))
+        .add(alternar(
+            fl!("use-source-colors"),
+            atual.source_colors,
+            Ajuste::CorDaFonte,
+        ))
+        .add(alternar(
+            fl!("use-album-colors"),
+            atual.album_color_enabled,
+            Ajuste::CorDoAlbum,
+        ))
+        .add(alternar(
+            fl!("album-color-background"),
+            atual.panel_color_style == ColorStyle::Chapado,
+            Ajuste::Chapado,
+        ));
+
+    let barra = settings::section()
+        .title(fl!("panel"))
+        .add(settings::item(
+            fl!("text-width"),
+            Row::new()
+                .spacing(8)
+                .align_y(cosmic::iced::alignment::Vertical::Center)
+                .push(text(format!("{largura} px")))
+                .push(
+                    slider(config::LARGURA_MIN..=config::LARGURA_MAX, largura, |px| {
+                        Message::Ajustar(Ajuste::Largura(px))
+                    })
+                    .step(10_u32)
+                    .width(Length::Fixed(120.0)),
+                ),
+        ))
+        .add(settings::item(
+            fl!("font-size"),
+            spin_button(
+                fonte_rotulo,
+                fl!("font-size"),
+                config.panel_font_size,
+                1,
+                0,
+                config::FONTE_MAX,
+                |px| Message::Ajustar(Ajuste::TamanhoDaFonte(px)),
+            ),
+        ))
+        .add(settings::item(
+            fl!("font-family"),
+            text_input(fl!("theme-default"), &config.panel_font_family)
+                .on_input(|v| Message::Ajustar(Ajuste::FamiliaDaFonte(v)))
+                .width(Length::Fixed(140.0)),
+        ))
+        .add(alternar(
+            fl!("panel-controls"),
+            atual.panel_controls,
+            Ajuste::ControlesNaBarra,
+        ))
+        .add(alternar(
+            fl!("remote-album-art"),
+            atual.album_art_remote,
+            Ajuste::CapaRemota,
+        ));
+
     Column::new()
         .spacing(12)
         .padding(12)
         .push(page_header(size.0, fl!("settings")))
-        .push(settings::item(
-            fl!("use-album-colors"),
-            toggler(model.settings.album_color_enabled).on_toggle(Message::SetAlbumColorEnabled),
-        ))
+        .push(
+            scrollable(Column::new().spacing(12).push(aparencia).push(barra))
+                .height(Length::Shrink),
+        )
+        .into()
+}
+
+/// O quadradinho ao lado do campo de cor: mostra a cor que o texto descreve,
+/// ou só a borda quando o campo está vazio (cor do tema).
+fn amostra<'a>(cor: Option<Color>) -> Element<'a, Message> {
+    container(text(""))
+        .width(Length::Fixed(18.0))
+        .height(Length::Fixed(18.0))
+        .class(cosmic::theme::Container::custom(move |theme| {
+            let borda = theme.cosmic().on_bg_color();
+            container::Style {
+                background: cor.map(Background::Color),
+                border: Border {
+                    radius: 4.0.into(),
+                    width: 1.0,
+                    color: Color::from(borda).scale_alpha(0.4),
+                },
+                ..container::Style::default()
+            }
+        }))
         .into()
 }
 

@@ -1,6 +1,7 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -9,7 +10,7 @@ use cosmic::iced::{Subscription, stream::channel};
 use mpris::{PlaybackStatus, PlayerFinder};
 use url::Url;
 
-use crate::fl;
+use crate::faixa::{self, Entrada};
 use crate::model::{MediaSnapshot, NowPlayingData, PlaybackState, PlayerInfo};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -17,6 +18,14 @@ const RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
 const ART_DOWNLOAD_TIMEOUT_SECONDS: &str = "8";
 const ART_DOWNLOAD_MAX_BYTES: &str = "8388608";
 const ART_CACHE_MAX_FILES: usize = 256;
+
+/// `album_art_remote` da configuração. A thread do monitor lê a cada volta, e
+/// a interface escreve quando a chave muda: vale sem reiniciar o applet.
+static PERMITIR_DOWNLOAD: AtomicBool = AtomicBool::new(true);
+
+pub fn permitir_download(permitir: bool) {
+    PERMITIR_DOWNLOAD.store(permitir, Ordering::Relaxed);
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum MediaCommand {
@@ -83,10 +92,6 @@ fn monitor() -> impl cosmic::iced::futures::Stream<Item = MediaSnapshot> {
 }
 
 fn monitor_loop(output: &mut mpsc::Sender<MediaSnapshot>) {
-    // Lida UMA vez, na subida: o laço roda a cada 500ms e reler o arquivo ali
-    // seriam 120 leituras de disco por minuto para uma chave que quase nunca
-    // muda. Trocar `album-art-remote` vale no próximo início do applet.
-    let allow_download = crate::settings::read_album_art_remote();
     let mut finder = None;
     let mut last_sent = None;
 
@@ -109,6 +114,7 @@ fn monitor_loop(output: &mut mpsc::Sender<MediaSnapshot>) {
         let Some(active_finder) = finder.as_ref() else {
             continue;
         };
+        let allow_download = PERMITIR_DOWNLOAD.load(Ordering::Relaxed);
         let snapshot = match scan(active_finder, allow_download) {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -135,6 +141,9 @@ fn scan(finder: &PlayerFinder, allow_download: bool) -> Result<MediaSnapshot, mp
     let players = finder
         .find_all()?
         .iter()
+        // O playerctld espelha outro player: contá-lo duplica a lista e esconde
+        // o nome de quem toca de verdade.
+        .filter(|player| !player.bus_name().ends_with(".playerctld"))
         .map(|player| player_info(player, allow_download))
         .collect::<Vec<_>>();
     Ok(MediaSnapshot { players })
@@ -150,69 +159,48 @@ fn player_info(player: &mpris::Player, allow_download: bool) -> PlayerInfo {
 
 fn now_playing(player: &mpris::Player, allow_download: bool) -> NowPlayingData {
     let state = playback_state(player);
-    let Ok(metadata) = player.get_metadata() else {
-        return NowPlayingData {
-            state,
-            ..NowPlayingData::nothing_playing()
-        };
-    };
+    let metadata = player.get_metadata().ok();
+    let desktop = player.get_desktop_entry().ok().flatten();
 
-    if metadata.is_empty() {
-        return NowPlayingData {
-            state,
-            ..NowPlayingData::nothing_playing()
-        };
-    }
-
-    // METADATA NAO-VAZIO E SEM FAIXA NAO E UMA FAIXA (2026-09-18)
-    //
-    //   O guard logo acima pergunta `metadata.is_empty()`, e um metadata com
-    //   UMA chave nao esta vazio. O Chrome, sem nada tocando, publica
-    //   exatamente isso e escapava por aqui: PlaybackStatus "Stopped" e
-    //   Metadata com uma chave so, `mpris:length` = 0.
-    //
-    //   Sem `xesam:title` e sem `xesam:artist`, as duas extracoes abaixo caiam
-    //   nos fallbacks `unknown-title` e `unknown-artist`, que no i18n sao a
-    //   MESMA palavra: "Unknown". O painel anunciava "Unknown - Unknown" o dia
-    //   inteiro, sem musica nenhuma em lugar nenhum.
-    //
-    //   Marcar como `nothing_playing` nao e cosmetico: `has_usable_metadata`
-    //   vira false, `AppModel::has_active_media()` acompanha, e `ui.rs:15`
-    //   devolve `text("")` -- o applet SOME do painel, que e o que se espera de
-    //   um player parado. E `preferred_player` deixa de eleger esse player
-    //   quando outro tiver faixa de verdade.
-    //
-    //   Os fallbacks FICAM: um player que anuncia so o titulo, ou so o artista,
-    //   continua valendo como faixa. O criterio novo e a AUSENCIA DOS DOIS.
-    let sem_titulo = metadata.title().is_none();
-    let sem_artista = match metadata.artists() {
-        Some(artistas) => artistas.is_empty(),
-        None => true,
-    };
-    if sem_titulo && sem_artista {
-        return NowPlayingData {
-            state,
-            ..NowPlayingData::nothing_playing()
-        };
-    }
-
-    let title = metadata
-        .title()
-        .map_or_else(|| fl!("unknown-title"), ToOwned::to_owned);
-    let artist = metadata
-        .artists()
-        .and_then(|artists| artists.first().copied())
-        .map_or_else(|| fl!("unknown-artist"), ToOwned::to_owned);
-
-    NowPlayingData {
-        text: format!("{title} - {artist}"),
-        title,
-        artist,
+    let vazio = || NowPlayingData {
         state,
-        album_art_path: metadata
-            .art_url()
-            .and_then(|url| art_path(url, allow_download)),
+        ..NowPlayingData::nothing_playing()
+    };
+
+    let entrada = Entrada {
+        bus: player.bus_name(),
+        identidade: player.identity(),
+        desktop: desktop.as_deref(),
+        titulo: metadata.as_ref().and_then(mpris::Metadata::title),
+        artistas: metadata
+            .as_ref()
+            .and_then(mpris::Metadata::artists)
+            .unwrap_or_default(),
+        artistas_do_album: metadata
+            .as_ref()
+            .and_then(mpris::Metadata::album_artists)
+            .unwrap_or_default(),
+        url: metadata.as_ref().and_then(mpris::Metadata::url),
+        capa: metadata.as_ref().and_then(mpris::Metadata::art_url),
+        estado: state,
+    };
+    let Some(faixa) = faixa::resolver(&entrada) else {
+        return vazio();
+    };
+
+    let text = if faixa.artista.is_empty() {
+        faixa.titulo.clone()
+    } else {
+        format!("{} \u{b7} {}", faixa.titulo, faixa.artista)
+    };
+    NowPlayingData {
+        text,
+        title: faixa.titulo,
+        artist: faixa.artista,
+        state,
+        album_art_path: entrada.capa.and_then(|url| art_path(url, allow_download)),
         has_usable_metadata: true,
+        fonte: faixa.fonte,
     }
 }
 
@@ -245,7 +233,7 @@ fn art_cache_path(value: &str) -> Option<PathBuf> {
     value.hash(&mut hasher);
     Some(
         dirs::cache_dir()?
-            .join("cosmic-ext-applet-now-playing/art")
+            .join("meowsystem-now-playing/art")
             .join(format!("{:016x}", hasher.finish())),
     )
 }
