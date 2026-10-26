@@ -1,4 +1,5 @@
 mod album_color;
+mod fonte;
 mod i18n;
 mod limpeza;
 mod media;
