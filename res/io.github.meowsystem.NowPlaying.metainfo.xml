@@ -1,20 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.github.DiegoMMR.CosmicExtAppletNowPlaying</id>
+  <id>io.github.meowsystem.NowPlaying</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
   <project_group>COSMIC</project_group>
-  <developer_name>Diego MMR</developer_name>
-  <update_contact>diego.mz.rv@gmail.com</update_contact>
-  <url type="homepage">https://github.com/cosmic-utils/cosmic-ext-applet-now-playing</url>
-  <url type="bugtracker">https://github.com/cosmic-utils/cosmic-ext-applet-now-playing/issues</url>
+  <developer_name>MeowSystem (fork do applet de Diego MMR)</developer_name>
+  <url type="homepage">https://github.com/vitoriamariadb/meowsystem-now-playing</url>
+  <url type="bugtracker">https://github.com/vitoriamariadb/meowsystem-now-playing/issues</url>
   <name>Now Playing</name>
+  <name xml:lang="pt-BR">Tocando agora</name>
   <name xml:lang="cs">Nyní hraje</name>
   <name xml:lang="es">Reproduciendo ahora</name>
   <name xml:lang="nl">Nu afgespeeld</name>
   <name xml:lang="sv">Nu spelas</name>
   <name xml:lang="uk">Відтворюється</name>
   <summary>Shows active media in the COSMIC panel</summary>
+  <summary xml:lang="pt-BR">Mostra na barra do COSMIC o que toca agora</summary>
   <summary xml:lang="cs">Zobrazuje aktivní média v panelu COSMIC</summary>
   <summary xml:lang="es">Muestra los medios activos en el panel COSMIC</summary>
   <summary xml:lang="nl">Toont actieve media in het COSMIC-paneel</summary>
@@ -22,6 +23,7 @@
   <summary xml:lang="uk">Відображає активні медіа на панелі COSMIC</summary>
   <description>
     <p>A COSMIC panel applet that displays current track title and artist from active MPRIS players, with a popup for album art and media controls.</p>
+    <p xml:lang="pt-BR">Applet da barra do COSMIC que mostra o título e o artista do que toca em qualquer player MPRIS (VLC, mpv, Celluloid, navegador), com o nome do arquivo limpo quando não há título, a cor do serviço (YouTube, Spotify, Twitch) e o tema do MeowSystem.</p>
     <p xml:lang="cs">Applet panelu COSMIC, který zobrazuje název právě přehrávané skladby a interpreta z aktivních přehrávačů MPRIS, s vyskakovacím oknem obsahujícím obal alba a ovládací prvky médií.</p>
     <p xml:lang="es">Un applet del panel COSMIC que muestra el título y el artista de la pista actual de los reproductores MPRIS activos, con una ventana emergente para la carátula del álbum y los controles multimedia.</p>
     <p xml:lang="nl">Een applet voor het COSMIC-paneel die de titel en artiest van het huidige nummer van actieve MPRIS-spelers toont, met een pop-up voor de albumhoes en mediabediening.</p>
@@ -49,6 +51,16 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.3.0" date="2026-10-26">
+      <description>
+        <ul>
+          <li>Fork do MeowSystem com id io.github.meowsystem.NowPlaying</li>
+          <li>Nome limpo do arquivo quando o player não publica título</li>
+          <li>Cor por serviço e configuração em cosmic-config com painel próprio</li>
+          <li>Tradução pt-BR</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-07-28">
       <description>
         <ul>
@@ -67,8 +79,8 @@
       </description>
     </release>
   </releases>
-  <launchable type="desktop-id">com.github.DiegoMMR.CosmicExtAppletNowPlaying.desktop</launchable>
-  <icon type="stock">com.github.DiegoMMR.CosmicExtAppletNowPlaying</icon>
+  <launchable type="desktop-id">io.github.meowsystem.NowPlaying.desktop</launchable>
+  <icon type="stock">io.github.meowsystem.NowPlaying</icon>
   <categories>
     <category>AudioVideo</category>
     <category>Utility</category>
@@ -76,7 +88,7 @@
   <provides>
     <id>com.system76.CosmicApplet</id>
     <binaries>
-      <binary>cosmic-ext-applet-now-playing</binary>
+      <binary>meowsystem-now-playing</binary>
     </binaries>
   </provides>
 </component>

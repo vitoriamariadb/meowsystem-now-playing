@@ -1,5 +1,5 @@
-name := 'cosmic-ext-applet-now-playing'
-export APPID := 'com.github.DiegoMMR.CosmicExtAppletNowPlaying'
+name := 'meowsystem-now-playing'
+export APPID := 'io.github.meowsystem.NowPlaying'
 
 rootdir := ''
 prefix := '/usr'
@@ -117,7 +117,7 @@ vendor-extract:
     tar pxf vendor.tar
 
 flatpak-build:
-    flatpak-builder --force-clean build-dir flatpak/com.github.DiegoMMR.CosmicExtAppletNowPlaying.json
+    flatpak-builder --force-clean build-dir flatpak/io.github.meowsystem.NowPlaying.json
 
 flatpak-install:
-    flatpak-builder --user --install --force-clean build-dir flatpak/com.github.DiegoMMR.CosmicExtAppletNowPlaying.json
+    flatpak-builder --user --install --force-clean build-dir flatpak/io.github.meowsystem.NowPlaying.json

@@ -1,0 +1,18 @@
+[Desktop Entry]
+Name=Tocando agora
+Name[en]=Now Playing
+Name[cs]=Nyní hraje
+Comment=Mostra na barra o que toca agora
+Comment[en]=Shows what is playing on the panel
+Exec=meowsystem-now-playing
+Terminal=false
+Type=Application
+StartupNotify=true
+Icon=io.github.meowsystem.NowPlaying
+Categories=AudioVideo;Utility;
+Keywords=Música;Mídia;Tocando agora;
+Keywords[en]=Music;Media;Now Playing;
+Keywords[cs]=Hudba;Média;Nyní hraje;
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=Auto
