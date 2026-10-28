@@ -6,6 +6,7 @@ use crate::album_color::dominant_album_color;
 use crate::fl;
 use crate::fonte::Fonte;
 use crate::settings::AppSettings;
+use crate::tema::Tema;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum PlaybackState {
@@ -82,6 +83,7 @@ pub struct AppModel {
     pub popup_page: PopupPage,
     pub settings: AppSettings,
     pub album_color: Option<Color>,
+    pub tema: Tema,
 }
 
 impl AppModel {
@@ -94,6 +96,7 @@ impl AppModel {
             popup_page: PopupPage::Main,
             settings,
             album_color: None,
+            tema: Tema::default(),
         };
         model.apply_snapshot(snapshot);
         model

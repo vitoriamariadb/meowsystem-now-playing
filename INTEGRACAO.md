@@ -105,6 +105,23 @@ que a chave nova é gravada, o legado daquela chave deixa de valer.
 O cache de capas mudou de `~/.cache/cosmic-ext-applet-now-playing/art` para
 `~/.cache/meowsystem-now-playing/art`.
 
+## Tema do pack
+
+O MeowSystem escreve as cores do pack em
+`$XDG_CONFIG_HOME/meowsystem/extensoes/io.github.meowsystem.NowPlaying/tema.conf` (ou no caminho de
+`$MEOWSYSTEM_TEMA`), uma linha `chave = #rrggbb` ou `#rrggbbaa` por cor. O applet lê ao subir e a
+cada abertura do popup. Sem o arquivo, ou com linha que não se entende, valem as cores do COSMIC.
+
+| chave | onde aparece |
+|---|---|
+| `acento` | o botão de tocar/pausar do popup, e o realce dele ao passar o mouse e ao clicar |
+| `fundo` | fundo do cartão do popup |
+| `borda` | contorno do cartão do popup |
+| `texto` | texto e ícones do popup |
+
+No pino: `TEMA="io.github.meowsystem.NowPlaying"` e
+`TEMA_CHAVES="acento:@acento fundo:base borda:surface1 texto:text"`.
+
 ## O que o MeowSystem precisa mudar
 
 Nada disto foi feito no MeowSystem; é a lista para a sprint.

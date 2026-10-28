@@ -7,6 +7,7 @@ mod media;
 mod model;
 mod settings;
 mod style;
+mod tema;
 mod ui;
 mod window;
 

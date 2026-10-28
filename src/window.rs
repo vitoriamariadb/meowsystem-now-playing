@@ -7,6 +7,7 @@ use cosmic::{Action, Element, Task};
 use crate::media::{self, MediaCommand};
 use crate::model::{AppModel, MediaSnapshot, PopupPage};
 use crate::settings::{self, AppSettings, ColorStyle};
+use crate::tema::Tema;
 use crate::ui;
 
 pub struct Window {
@@ -69,7 +70,8 @@ impl cosmic::Application for Window {
         let config = settings::carregar(config_handle.as_ref());
         let app_settings = AppSettings::from(&config);
         media::permitir_download(app_settings.album_art_remote);
-        let model = AppModel::new(app_settings, media::initial_snapshot());
+        let mut model = AppModel::new(app_settings, media::initial_snapshot());
+        model.tema = Tema::carregar(settings::APP_ID);
         (
             Self {
                 core,
@@ -151,6 +153,8 @@ impl Window {
             self.model.set_popup_page(PopupPage::Main);
             return surface_task(destroy_popup(popup));
         }
+
+        self.model.tema = Tema::carregar(settings::APP_ID);
 
         let Some(parent) = self.core.main_window_id() else {
             eprintln!("unable to open popup: main applet window is unavailable");

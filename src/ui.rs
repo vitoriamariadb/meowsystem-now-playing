@@ -12,6 +12,7 @@ use crate::fl;
 use crate::model::{AppModel, PlaybackState, PopupPage};
 use crate::settings::{self as config, ColorStyle};
 use crate::style::{applet_button, shift_color};
+use crate::tema::{self, Tema};
 use crate::window::{Ajuste, Message};
 
 #[allow(clippy::too_many_lines)]
@@ -184,7 +185,16 @@ pub fn popup<'a>(
         PopupPage::Settings => settings_page(core, model, config),
     };
 
-    core.applet.popup_container(content).into()
+    if !model.tema.veste_o_cartao() {
+        return core.applet.popup_container(content).into();
+    }
+    let tema = model.tema;
+    let cartao = container(content)
+        .width(Length::Fill)
+        .class(cosmic::theme::Container::custom(move |theme| {
+            tema.cartao(theme)
+        }));
+    core.applet.popup_container(cartao).into()
 }
 
 // A LARGURA DO POPUP NÃO É NOSSA — E NÃO É A `MIDIA_LARGURA`.
@@ -300,11 +310,11 @@ fn main_popup<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
             fl!("previous-track"),
             Message::PreviousTrack,
         ))
-        .push(accessible_icon_button_without_tooltip(
+        .push(botao_de_tocar(
             transport_icon(model),
             size.0 + 4,
             fl!("toggle-play-pause"),
-            Message::TogglePlayPause,
+            model.tema,
         ))
         .push(accessible_icon_button_without_tooltip(
             "media-skip-forward-symbolic",
@@ -571,6 +581,45 @@ fn accessible_icon_button_without_tooltip(
     button::icon(icon::from_name(icon_name.to_owned()).size(size))
         .name(label)
         .on_press(message)
+        .into()
+}
+
+fn botao_de_tocar(
+    icon_name: &str,
+    size: u16,
+    label: String,
+    tema: Tema,
+) -> Element<'static, Message> {
+    let botao = button::icon(icon::from_name(icon_name.to_owned()).size(size))
+        .name(label)
+        .on_press(Message::TogglePlayPause);
+    if tema.acento.is_none() {
+        return botao.into();
+    }
+    botao
+        .class(cosmic::theme::Button::Custom {
+            active: Box::new(move |focused, theme| {
+                tema.no_botao(
+                    theme.active(focused, false, &cosmic::theme::Button::Icon),
+                    0.0,
+                )
+            }),
+            disabled: Box::new(move |theme| {
+                tema.no_botao(theme.disabled(&cosmic::theme::Button::Icon), 0.0)
+            }),
+            hovered: Box::new(move |focused, theme| {
+                tema.no_botao(
+                    theme.hovered(focused, false, &cosmic::theme::Button::Icon),
+                    tema::REALCE,
+                )
+            }),
+            pressed: Box::new(move |focused, theme| {
+                tema.no_botao(
+                    theme.pressed(focused, false, &cosmic::theme::Button::Icon),
+                    tema::PRESSAO,
+                )
+            }),
+        })
         .into()
 }
 

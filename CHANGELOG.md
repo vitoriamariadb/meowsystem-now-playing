@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.0] - 2026-10-28
+
+### Adicionado
+
+- Extensão de tema do MeowSystem: `~/.config/meowsystem/extensoes/io.github.meowsystem.NowPlaying/tema.conf`
+  (`acento`, `fundo`, `borda`, `texto`, em `#rrggbb` ou `#rrggbbaa`). O fundo, a borda e o texto vestem
+  o cartão do popup; o acento pinta o botão de tocar e o realce dele. Sem o arquivo, ficam as cores do COSMIC.
+
 ## [0.3.0] - 2026-10-26
 
 Primeira versão do fork do MeowSystem.
