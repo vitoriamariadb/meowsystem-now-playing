@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.1] - 2026-11-03
+
+### Adicionado
+
+- Os controles da barra (anterior, tocar/pausar, próximo) levam o `acento` do `tema.conf`, como o botão
+  de tocar do popup. Sem acento, ficam com a cor do COSMIC.
+
 ## [0.4.0] - 2026-10-28
 
 ### Adicionado
