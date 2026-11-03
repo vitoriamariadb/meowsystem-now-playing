@@ -23,13 +23,19 @@ pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
 
     let size = core.applet.suggested_size(true);
     let padding = core.applet.suggested_padding(true);
-    let transport = mouse_area(icon::from_name(transport_icon(model)).size(size.0))
-        .on_press(Message::TogglePlayPause);
-
-    let previous = mouse_area(icon::from_name("media-skip-backward-symbolic").size(size.0))
-        .on_press(Message::PreviousTrack);
-    let next = mouse_area(icon::from_name("media-skip-forward-symbolic").size(size.0))
-        .on_press(Message::NextTrack);
+    // Os três da barra levam o acento do pack, como o botão de tocar do popup.
+    let controle = |nome: &'static str, mensagem: Message| {
+        mouse_area(
+            icon::from_name(nome)
+                .size(size.0)
+                .icon()
+                .class(model.tema.no_icone()),
+        )
+        .on_press(mensagem)
+    };
+    let transport = controle(transport_icon(model), Message::TogglePlayPause);
+    let previous = controle("media-skip-backward-symbolic", Message::PreviousTrack);
+    let next = controle("media-skip-forward-symbolic", Message::NextTrack);
 
     let mut content = Row::new()
         .spacing(padding.0)

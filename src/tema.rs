@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use cosmic::iced::{Background, Border, Color, Shadow};
-use cosmic::widget::{button, container};
+use cosmic::widget::{button, container, svg};
 
 pub const ARQUIVO: &str = "tema.conf";
 pub const VARIAVEL: &str = "MEOWSYSTEM_TEMA";
@@ -100,6 +100,16 @@ impl Tema {
             icon_color: Some(tinta),
             snap: true,
         }
+    }
+
+    #[must_use]
+    pub fn no_icone(&self) -> cosmic::theme::Svg {
+        let Some(acento) = self.acento else {
+            return cosmic::theme::Svg::Default;
+        };
+        cosmic::theme::Svg::custom(move |_| svg::Style {
+            color: Some(acento),
+        })
     }
 
     pub fn no_botao(&self, mut base: button::Style, realce: f32) -> button::Style {
@@ -226,6 +236,19 @@ mod tests {
         let fundo = theme.cosmic().background(theme.transparent);
         assert_eq!(cru.background, Some(Background::Color(fundo.base.into())));
         assert_eq!(cru.border.color, Color::from(fundo.divider));
+    }
+
+    #[test]
+    fn os_controles_da_barra_levam_o_acento_e_sem_acento_ficam_com_o_cosmic() {
+        use cosmic::iced::widget::svg::Catalog;
+        let theme = cosmic::Theme::dark();
+        let tema = Tema::ler("acento = #cba6f7\n");
+        let vestido = theme.style(&tema.no_icone(), svg::Status::Idle);
+        assert_eq!(vestido.color, cor("#cba6f7"));
+        assert!(matches!(
+            Tema::default().no_icone(),
+            cosmic::theme::Svg::Default
+        ));
     }
 
     #[test]
