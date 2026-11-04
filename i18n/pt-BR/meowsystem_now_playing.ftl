@@ -21,3 +21,4 @@ font-size = Tamanho da letra
 font-family = Fonte
 panel-controls = Controles na barra
 remote-album-art = Baixar capas
+playing = Tocando

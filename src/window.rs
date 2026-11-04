@@ -49,6 +49,7 @@ pub enum Message {
     PreviousTrack,
     TogglePlayPause,
     NextTrack,
+    Surface(cosmic::surface::Action),
 }
 
 impl cosmic::Application for Window {
@@ -91,6 +92,7 @@ impl cosmic::Application for Window {
     fn update(&mut self, message: Message) -> Task<Action<Self::Message>> {
         match message {
             Message::TogglePopup => return self.toggle_popup(),
+            Message::Surface(acao) => return surface_task(acao),
             Message::ShowMain => self.model.set_popup_page(PopupPage::Main),
             Message::ShowPlayerList => self.model.set_popup_page(PopupPage::PlayerList),
             Message::ShowSettings => self.model.set_popup_page(PopupPage::Settings),
@@ -139,7 +141,7 @@ impl cosmic::Application for Window {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        ui::panel(&self.core, &self.model)
+        ui::panel(&self.core, &self.model, self.popup.is_some())
     }
 
     fn view_window(&self, _id: Id) -> Element<'_, Message> {

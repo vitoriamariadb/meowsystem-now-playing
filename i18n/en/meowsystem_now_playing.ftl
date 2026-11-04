@@ -21,3 +21,4 @@ font-size = Font size
 font-family = Font
 panel-controls = Controls on the panel
 remote-album-art = Download covers
+playing = Playing

@@ -22,7 +22,7 @@ pub fn entre_controles(padding: u16) -> u16 {
     padding.saturating_mul(2)
 }
 
-pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
+pub fn panel<'a>(core: &Core, model: &'a AppModel, popup_aberto: bool) -> Element<'a, Message> {
     if !model.has_active_media() {
         return core.applet.autosize_window(text("")).into();
     }
@@ -189,6 +189,15 @@ pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
             }),
         })
         .on_press(Message::TogglePopup);
+
+    let dica = if model.now_playing.title.is_empty() {
+        fl!("playing")
+    } else {
+        model.now_playing.text.clone()
+    };
+    let button = core
+        .applet
+        .applet_tooltip(button, dica, popup_aberto, Message::Surface, None);
 
     core.applet.autosize_window(button).into()
 }
