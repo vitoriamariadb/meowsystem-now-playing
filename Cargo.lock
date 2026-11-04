@@ -2977,7 +2977,7 @@ dependencies = [
 
 [[package]]
 name = "meowsystem-now-playing"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "dirs",
  "i18n-embed",
