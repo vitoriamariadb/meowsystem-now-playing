@@ -16,6 +16,12 @@ use crate::tema::{self, Tema};
 use crate::window::{Ajuste, Message};
 
 #[allow(clippy::too_many_lines)]
+/// Dois applets lado a lado ficam a duas vezes o padding do painel.
+#[must_use]
+pub fn entre_controles(padding: u16) -> u16 {
+    padding.saturating_mul(2)
+}
+
 pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
     if !model.has_active_media() {
         return core.applet.autosize_window(text("")).into();
@@ -131,8 +137,19 @@ pub fn panel<'a>(core: &Core, model: &'a AppModel) -> Element<'a, Message> {
     // Os botões só entram se ela quiser. Ver `read_panel_controls`: na topbar
     // dela o applet de Som já desenha os dele um dedo ao lado, e o par dobrado
     // lê como defeito. O popup continua com os três, sempre.
+    // Entre os três, e entre o nome e eles, o mesmo respiro que o painel deixa
+    // entre dois applets: colados, liam como um bloco só ao lado de Som e Rede.
     if model.settings.panel_controls {
-        content = content.push(previous).push(transport).push(next);
+        let respiro = entre_controles(padding.0);
+        content = content.push(
+            Row::new()
+                .spacing(respiro)
+                .padding(cosmic::iced::Padding::ZERO.left(respiro - padding.0))
+                .align_y(cosmic::iced::alignment::Vertical::Center)
+                .push(previous)
+                .push(transport)
+                .push(next),
+        );
     }
     let content = content;
 
@@ -635,5 +652,17 @@ fn transport_icon(model: &AppModel) -> &'static str {
         PlaybackState::Paused | PlaybackState::Stopped | PlaybackState::Unknown => {
             "media-playback-start-symbolic"
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn os_controles_ficam_tao_longe_quanto_dois_applets() {
+        assert_eq!(entre_controles(8), 16);
+        assert_eq!(entre_controles(0), 0);
+        assert_eq!(entre_controles(u16::MAX), u16::MAX);
     }
 }
