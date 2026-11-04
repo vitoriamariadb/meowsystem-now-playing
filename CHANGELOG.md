@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.2] - 2026-11-03
+
+### Corrigido
+
+- Na barra, os três controles ficam tão longe entre si, e do nome, quanto dois applets vizinhos: o
+  dobro do padding que o painel dá a cada applet.
+
 ## [0.4.1] - 2026-11-03
 
 ### Adicionado
